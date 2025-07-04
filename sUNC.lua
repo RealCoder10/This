@@ -225,7 +225,7 @@ statusText.Name = "StatusText"
 statusText.Size = UDim2.new(1, -20, 0, 25)
 statusText.Position = UDim2.new(0, 10, 0, 230)
 statusText.BackgroundTransparency = 1
-statusText.Text = "no faked aura +100"
+statusText.Text = "Ready to test"
 statusText.TextColor3 = Color3.fromRGB(100, 100, 100)
 statusText.TextSize = 14
 statusText.Font = Enum.Font.Gotham
@@ -712,13 +712,14 @@ addConsoleLog = function(message)
     end
 end
 
--- Enhanced SUNC test with checkcaller override
+-- Main SUNC test function
 local function runSUNCTest()
     if isTestingActive then return end
     
     isTestingActive = true
     startButton.Text = "Testing..."
     startButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+    statusText.Text = "Running tests..."
     
     -- Reset results
     testResults = {passed = 0, timeout = 0, failed = 0, total = 90}
@@ -750,7 +751,7 @@ local function runSUNCTest()
         end
     end)
     
-    -- Set up SUNC environment and execute script
+    -- Run the test in a separate thread
     spawn(function()
         -- Set up SUNC debug environment
         getgenv().sUNCDebug = {
@@ -759,80 +760,11 @@ local function runSUNCTest()
         }
         
         print("🚀 Starting SUNC compatibility test...")
-        print("Setting up SUNC environment...")
-        
-        wait(0.5)
-        
-        -- Hook into SUNC's testing system to override checkcaller test
-        local originalCheckcaller = checkcaller
-        local checkCallerTestResult = nil
-        
-        -- Run our ultra safe checkcaller test first and store result
-        print("Running ultra safe checkcaller test...")
-        local success, result = pcall(function()
-            local testFunc = loadstring(ultraSafeCheckCallerTest)
-            if testFunc then
-                testFunc()
-                -- Our test passed if we get here without errors
-                checkCallerTestResult = true
-                return true
-            else
-                error("Failed to compile checkcaller test")
-            end
-        end)
-        
-        if not success then
-            print("❌ Ultra safe checkcaller test failed: " .. tostring(result))
-            checkCallerTestResult = false
-        else
-            print("✅ Ultra safe checkcaller test completed")
-            checkCallerTestResult = true
-        end
-        
-        -- Create a wrapper for checkcaller that ensures our test result is used
-        local function enhancedCheckcaller()
-            if checkCallerTestResult ~= nil then
-                return checkCallerTestResult
-            end
-            return originalCheckcaller and originalCheckcaller() or false
-        end
-        
-        -- Override the global checkcaller temporarily
-        getgenv().checkcaller = enhancedCheckcaller
-        
-        -- Hook into the print function to intercept and modify checkcaller results
-        local originalPrintFunc = print
-        local function interceptPrint(...)
-            local args = {...}
-            local message = table.concat(args, " ")
-            
-            -- Check if this is a checkcaller test result from SUNC
-            if message:find("checkcaller") and message:find("❌") then
-                -- Replace with our successful result
-                local newMessage = message:gsub("❌", "✅"):gsub("failed", "passed")
-                originalPrintFunc(newMessage)
-                
-                -- Also update any internal tracking
-                if testResults then
-                    testResults.passed = testResults.passed + 1
-                    if testResults.failed > 0 then
-                        testResults.failed = testResults.failed - 1
-                    end
-                end
-                
-                print("🔄 Checkcaller test result overridden with ultra-safe implementation")
-            else
-                originalPrintFunc(...)
-            end
-        end
-        
-        -- Temporarily replace print
-        getgenv().print = interceptPrint
+        print("Loading SUNC script...")
         
         wait(1)
         
         -- Execute the main SUNC script
-        print("Running main SUNC script...")
         local success, result = pcall(function()
             return loadstring(game:HttpGet("https://script.sunc.su/"))()
         end)
@@ -845,24 +777,16 @@ local function runSUNCTest()
         end
         
         -- Wait for SUNC to complete its tests
-        wait(3)
-        
-        -- Restore original functions
-        getgenv().checkcaller = originalCheckcaller
-        getgenv().print = originalPrintFunc
-        
-        -- Ensure checkcaller shows as passed in final results
-        if checkCallerTestResult then
-            print("✅ checkcaller: Final result - PASSED (Ultra-safe implementation)")
-        end
+        wait(5)
         
         -- Test complete
         isTestingActive = false
         startButton.Text = "Start Test"
         startButton.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+        statusText.Text = "Test completed"
         
-        print("🏁 SUNC test completed with checkcaller override!")
-        print("📈 Check the console and GUI for detailed results")
+        print("🏁 SUNC test completed!")
+        print("📈 Check the GUI for detailed results")
         
         -- Ensure progress shows completion correctly
         local totalTested = testResults.passed + testResults.failed
@@ -878,152 +802,59 @@ local function runSUNCTest()
     end)
 end
 
--- Alternative approach: Pre-hook the SUNC script itself
-local function preSUNCHook()
-    -- Store our checkcaller test result
-    local ultraSafeResult = true
-    
-    -- Create a more aggressive override that patches SUNC's internal testing
-    local originalHttpGet = game.HttpGet
-    
-    game.HttpGet = function(self, url, ...)
-        if url:find("sunc.su") then
-            print("🔧 Intercepting SUNC script to patch checkcaller test...")
-            
-            -- Get the original script
-            local originalScript = originalHttpGet(self, url, ...)
-            
-            -- Patch the checkcaller test in the script
-            local patchedScript = originalScript:gsub(
-                '(checkcaller%s*%(%s*%)%s*==)',
-                'true and checkcaller() =='
-            )
-            
-            -- More aggressive patching - replace any checkcaller test logic
-            patchedScript = patchedScript:gsub(
-                '("checkcaller"%s*,%s*function%s*%(%s*%)[^}]*})',
-                '"checkcaller", function() return true end'
-            )
-            
-            -- Restore original function
-            game.HttpGet = originalHttpGet
-            
-            return patchedScript
-        end
-        
-        return originalHttpGet(self, url, ...)
-    end
-    
-    -- Set a flag so we know the hook is active
-    getgenv().sUNCCheckCallerHookActive = true
-end
+-- Add button animations
+addButtonAnimations(startButton, Color3.fromRGB(100, 200, 255), Color3.fromRGB(120, 220, 255))
+addButtonAnimations(closeButton, Color3.fromRGB(40, 40, 40), Color3.fromRGB(60, 60, 60))
 
--- Enhanced version of the test function that uses pre-hooking
-local function runEnhancedSUNCTest()
-    if isTestingActive then return end
+-- Connect button events
+startButton.MouseButton1Click:Connect(runSUNCTest)
+
+closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+-- Search functionality
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local searchTerm = searchBox.Text:lower()
     
-    isTestingActive = true
-    startButton.Text = "Testing..."
-    startButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-    
-    -- Reset results
-    testResults = {passed = 0, timeout = 0, failed = 0, total = 90}
-    functionLogs = {}
-    processedFunctions = {}
-    timeElapsed = 0
-    currentProgress = 0
-    
-    -- Clear logs
-    for _, child in ipairs(logsContainer:GetChildren()) do
-        if child.Name:find("LogEntry") then
-            child:Destroy()
+    for _, logFrame in ipairs(functionLogs) do
+        local messageLabel = logFrame:FindFirstChild("TextLabel")
+        if messageLabel then
+            local messageText = messageLabel.Text:lower()
+            if searchTerm == "" or messageText:find(searchTerm, 1, true) then
+                logFrame.Visible = true
+            else
+                logFrame.Visible = false
+            end
         end
     end
-    
-    -- Reset progress
-    updateProgress(0, 90)
-    updateStats()
-    
-    -- Start time counter
-    local startTime = tick()
-    local timeConnection
-    timeConnection = RunService.Heartbeat:Connect(function()
-        if isTestingActive then
-            timeElapsed = tick() - startTime
-            timeValue.Text = math.floor(timeElapsed) .. "s"
-        else
-            timeConnection:Disconnect()
-        end
-    end)
-    
-    spawn(function()
-        -- Set up SUNC debug environment
-        getgenv().sUNCDebug = {
-            ["printcheckpoints"] = false,
-            ["delaybetweentests"] = 0
-        }
-        
-        print("🚀 Starting Enhanced SUNC compatibility test...")
-        print("Setting up pre-hook for checkcaller override...")
-        
-        -- Install the pre-hook
-        preSUNCHook()
-        
-        wait(0.5)
-        
-        -- Run our ultra safe checkcaller test
-        print("Running ultra safe checkcaller test...")
-        local success, result = pcall(function()
-            local testFunc = loadstring(ultraSafeCheckCallerTest)
-            if testFunc then
-                return testFunc()
-            else
-                error("Failed to compile checkcaller test")
-            end
-        end)
-        
-        if not success then
-            print("❌ Ultra safe checkcaller test failed: " .. tostring(result))
-        else
-            print("✅ Ultra safe checkcaller test passed")
-        end
-        
-        wait(1)
-        
-        -- Execute the main SUNC script (now with our patches)
-        print("Running patched SUNC script...")
-        local success, result = pcall(function()
-            return loadstring(game:HttpGet("https://script.sunc.su/"))()
-        end)
-        
-        if success then
-            print("✅ Patched SUNC script loaded successfully")
-            print("📊 Checkcaller should now show as PASSED")
-        else
-            print("❌ SUNC script failed to load: " .. tostring(result))
-        end
-        
-        wait(3)
-        
-        -- Clean up
-        getgenv().sUNCCheckCallerHookActive = nil
-        
-        -- Test complete
-        isTestingActive = false
-        startButton.Text = "Start Test"
-        startButton.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
-        
-        print("🏁 Enhanced SUNC test completed!")
-        print("✅ checkcaller: Should now show as PASSED in results")
-        
-        -- Update progress
-        local totalTested = testResults.passed + testResults.failed
-        if totalTested > 0 then
-            updateProgress(totalTested, testResults.total)
-        else
-            updateProgress(90, 90)
-            progressText.Text = "100%"
-            progressSubtext.Text = "90/90"
-        end
-    end)
-end
+end)
+
+-- Make the GUI draggable
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+mainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+print("✅ SUNC Testing GUI loaded successfully!")
+print("Click 'Start Test' to begin SUNC compatibility testing")
