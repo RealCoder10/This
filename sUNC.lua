@@ -107,6 +107,7 @@ local State = {
     functionLogs = {},
     currentProgress = 0,
     processedFunctions = {},
+    actualTestCount = 0, -- Track actual tests processed
     
     -- UI References (populated during creation)
     ui = {}
@@ -452,7 +453,7 @@ local function createLeftPanel(parent)
     versionText.Size = UDim2.new(1, -20, 0, 25)
     versionText.Position = UDim2.new(0, 10, 0, 255)
     versionText.BackgroundTransparency = 1
-    versionText.Text = "v2.1.0"
+    versionText.Text = "v2.2.0"
     versionText.TextColor3 = CONFIG.COLORS.TEXT_DISABLED
     versionText.TextSize = 12
     versionText.Font = Enum.Font.Gotham
@@ -656,7 +657,7 @@ end
 -- BUSINESS LOGIC
 -- ========================================
 
---- Updates the progress display
+--- Updates the progress display with correct calculation
 -- @param current: number - Current progress value
 -- @param total: number - Total possible value
 local function updateProgress(current, total)
@@ -711,6 +712,7 @@ local function addConsoleLog(message)
         if not State.processedFunctions[functionName] then
             State.processedFunctions[functionName] = true
             shouldCount = true
+            State.actualTestCount = State.actualTestCount + 1
         end
     end
     
@@ -785,8 +787,8 @@ local function addConsoleLog(message)
     -- Update stats and progress if this was a function result
     if isFunctionResult and shouldCount then
         updateStats()
-        local totalTested = State.testResults.passed + State.testResults.failed + State.testResults.timeout
-        updateProgress(totalTested, State.testResults.total)
+        -- Use actual test count for more accurate progress
+        updateProgress(State.actualTestCount, State.testResults.total)
     end
 end
 
@@ -808,6 +810,7 @@ local function runSUNCTest()
     State.processedFunctions = {}
     State.timeElapsed = 0
     State.currentProgress = 0
+    State.actualTestCount = 0
     
     -- Clear existing logs
     for _, child in ipairs(State.ui.logsContainer:GetChildren()) do
@@ -894,10 +897,12 @@ local function runSUNCTest()
         print("🏁 SUNC test completed!")
         print("📈 Check the GUI for detailed results")
         
-        -- Ensure progress shows completion
-        local totalTested = State.testResults.passed + State.testResults.failed + State.testResults.timeout
-        if totalTested > 0 then
-            updateProgress(totalTested, State.testResults.total)
+        -- Final progress update using actual test count
+        if State.actualTestCount > 0 then
+            updateProgress(State.actualTestCount, State.actualTestCount)
+            -- Update the total to match actual tests found
+            State.testResults.total = State.actualTestCount
+            State.ui.progressSubtext.Text = State.actualTestCount .. "/" .. State.actualTestCount
         else
             updateProgress(CONFIG.TOTAL_TESTS, CONFIG.TOTAL_TESTS)
             State.ui.progressText.Text = "100%"
