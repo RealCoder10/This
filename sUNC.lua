@@ -41,6 +41,7 @@ local CONFIG = {
         SUCCESS = Color3.fromRGB(100, 255, 100),
         WARNING = Color3.fromRGB(255, 200, 100),
         ERROR = Color3.fromRGB(255, 100, 100),
+        INFO = Color3.fromRGB(100, 150, 255),
         TEXT_PRIMARY = Color3.fromRGB(255, 255, 255),
         TEXT_SECONDARY = Color3.fromRGB(200, 200, 200),
         TEXT_MUTED = Color3.fromRGB(150, 150, 150),
@@ -66,7 +67,10 @@ local SUNC_FUNCTIONS = {
     "syn_request", "WebSocket.connect", "Drawing.new", "isrenderobj", "getrenderproperty", "setrenderproperty",
     "cleardrawcache", "getsynasset", "getcustomasset", "saveinstance", "messagebox", "setclipboard",
     "getclipboard", "toclipboard", "queue_on_teleport", "syn_queue_on_teleport", "debug.getproto",
-    "getrawmetatable", "getnamecallmethod", "filtergc"
+    "getrawmetatable", "getnamecallmethod", "filtergc", "getfunctionhash", "setreadonly", "isreadonly",
+    "getfenv", "setfenv", "getupvalue", "setupvalue", "getupvalues", "setupvalues", "getconstant",
+    "getconstants", "setconstant", "setconstants", "getprotos", "getproto", "setproto", "getstack",
+    "setstack", "getlocal", "setlocal", "getlocals", "setlocals", "getregistry"
 }
 
 -- Convert to lookup table for O(1) access
@@ -141,7 +145,7 @@ local function safeExecute(func, errorMessage)
     return success, result
 end
 
---- Extracts function name from console message
+--- Extracts function name from console message with improved detection
 -- @param message: string - Console message to parse
 -- @return string|nil - Function name if found
 local function extractFunctionName(message)
@@ -149,18 +153,34 @@ local function extractFunctionName(message)
         return nil
     end
     
-    local cleanMessage = message:gsub("[✅❌ℹ️]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    -- Clean the message of status indicators and whitespace
+    local cleanMessage = message:gsub("[✅❌ℹ️❕⚠️]", ""):gsub("^%s+", ""):gsub("%s+$", "")
     
+    -- Look for function names in the message
     for funcName, _ in pairs(SUNC_FUNCTION_LOOKUP) do
-        if cleanMessage:lower():find(funcName, 1, true) then
-            return funcName
+        -- Check for exact matches and common patterns
+        local patterns = {
+            "^" .. funcName .. "$",  -- Exact match
+            "^" .. funcName .. "%s",  -- Function name at start
+            "%s" .. funcName .. "$",  -- Function name at end
+            "%s" .. funcName .. "%s", -- Function name in middle
+            "'" .. funcName .. "'",   -- Quoted function name
+            '"' .. funcName .. '"',   -- Double quoted function name
+            funcName .. "%(", -- Function call pattern
+            funcName .. "%.", -- Method call pattern
+        }
+        
+        for _, pattern in ipairs(patterns) do
+            if cleanMessage:lower():find(pattern) then
+                return funcName
+            end
         end
     end
     
     return nil
 end
 
---- Determines if message represents a function test result
+--- Determines if message represents a function test result with improved logic
 -- @param message: string - Message to analyze
 -- @return boolean - Whether this is a function test result
 local function isFunctionTestResult(message)
@@ -168,9 +188,19 @@ local function isFunctionTestResult(message)
         return false
     end
     
-    -- Must contain success/fail indicator
-    if not (message:find("✅") or message:find("❌")) then
-        return false
+    local lowerMessage = message:lower()
+    
+    -- Skip obvious non-function messages
+    local skipPatterns = {
+        "getting", "loading", "starting", "completed", "past", "debug:",
+        "test completed", "script loaded", "results will appear",
+        "sunc test", "compatibility test", "check the gui"
+    }
+    
+    for _, pattern in ipairs(skipPatterns) do
+        if lowerMessage:find(pattern, 1, true) then
+            return false
+        end
     end
     
     -- Must contain a recognizable function name
@@ -179,17 +209,29 @@ local function isFunctionTestResult(message)
         return false
     end
     
-    -- Exclude summary messages
-    local lowerMessage = message:lower()
-    local excludeWords = {"passed", "failed", "total", "test", "script", "loading", "starting", "completed"}
+    -- Additional validation for function test results
+    -- Look for patterns that indicate this is a test result
+    local resultPatterns = {
+        "function is nil",
+        "neutral",
+        "passed",
+        "failed",
+        "working",
+        "not working",
+        "error",
+        "success"
+    }
     
-    for _, word in ipairs(excludeWords) do
-        if lowerMessage:find(word) then
-            return false
+    local hasResultPattern = false
+    for _, pattern in ipairs(resultPatterns) do
+        if lowerMessage:find(pattern, 1, true) then
+            hasResultPattern = true
+            break
         end
     end
     
-    return true
+    -- If it has a function name and either a status indicator or result pattern, it's likely a test result
+    return hasResultPattern or message:find("[✅❌❕⚠️]")
 end
 
 --- Creates a UI corner with specified radius
@@ -249,35 +291,45 @@ local function createMainGUI()
     return screenGui
 end
 
---- Creates the main frame with shadow
+--- Creates the main frame with shadow (fixed dragging)
 -- @param parent: Instance - Parent container
--- @return Frame - Main frame
+-- @return Frame, Frame - Main frame and shadow frame
 local function createMainFrame(parent)
+    -- Container frame for both shadow and main frame
+    local containerFrame = Instance.new("Frame")
+    containerFrame.Name = "Container"
+    containerFrame.Size = UDim2.new(0, CONFIG.MAIN_SIZE.X.Offset + 8, 0, CONFIG.MAIN_SIZE.Y.Offset + 8)
+    containerFrame.Position = UDim2.new(0.5, -(CONFIG.MAIN_SIZE.X.Offset + 8)/2, 0.5, -(CONFIG.MAIN_SIZE.Y.Offset + 8)/2)
+    containerFrame.BackgroundTransparency = 1
+    containerFrame.BorderSizePixel = 0
+    containerFrame.ZIndex = 99
+    containerFrame.Parent = parent
+    
     -- Shadow frame
     local shadowFrame = Instance.new("Frame")
     shadowFrame.Name = "Shadow"
-    shadowFrame.Size = UDim2.new(0, CONFIG.MAIN_SIZE.X.Offset + 8, 0, CONFIG.MAIN_SIZE.Y.Offset + 8)
-    shadowFrame.Position = UDim2.new(0.5, -(CONFIG.MAIN_SIZE.X.Offset + 8)/2, 0.5, -(CONFIG.MAIN_SIZE.Y.Offset + 8)/2)
+    shadowFrame.Size = UDim2.new(1, 0, 1, 0)
+    shadowFrame.Position = UDim2.new(0, 0, 0, 0)
     shadowFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     shadowFrame.BackgroundTransparency = 0.7
     shadowFrame.BorderSizePixel = 0
     shadowFrame.ZIndex = 99
-    shadowFrame.Parent = parent
+    shadowFrame.Parent = containerFrame
     createCorner(shadowFrame, 16)
     
     -- Main frame
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = CONFIG.MAIN_SIZE
-    mainFrame.Position = UDim2.new(0.5, -CONFIG.MAIN_SIZE.X.Offset/2, 0.5, -CONFIG.MAIN_SIZE.Y.Offset/2)
+    mainFrame.Size = UDim2.new(0, CONFIG.MAIN_SIZE.X.Offset, 0, CONFIG.MAIN_SIZE.Y.Offset)
+    mainFrame.Position = UDim2.new(0, 4, 0, 4)
     mainFrame.BackgroundColor3 = CONFIG.COLORS.BACKGROUND
     mainFrame.BorderSizePixel = 0
     mainFrame.ClipsDescendants = true
     mainFrame.ZIndex = 100
-    mainFrame.Parent = parent
+    mainFrame.Parent = containerFrame
     createCorner(mainFrame, 12)
     
-    return mainFrame
+    return mainFrame, containerFrame
 end
 
 --- Creates a close button
@@ -400,7 +452,7 @@ local function createLeftPanel(parent)
     versionText.Size = UDim2.new(1, -20, 0, 25)
     versionText.Position = UDim2.new(0, 10, 0, 255)
     versionText.BackgroundTransparency = 1
-    versionText.Text = "v2.0.0"
+    versionText.Text = "v2.1.0"
     versionText.TextColor3 = CONFIG.COLORS.TEXT_DISABLED
     versionText.TextSize = 12
     versionText.Font = Enum.Font.Gotham
@@ -634,7 +686,7 @@ local function updateStats()
     end
 end
 
---- Adds a console log entry to the GUI
+--- Adds a console log entry to the GUI with improved detection
 -- @param message: string - Log message to add
 local function addConsoleLog(message)
     if not validateInput(message, "string", "message") then
@@ -662,7 +714,7 @@ local function addConsoleLog(message)
         end
     end
     
-    -- Status indicator
+    -- Status indicator with improved logic
     local statusIndicator = Instance.new("TextLabel")
     statusIndicator.Size = UDim2.new(0, 30, 1, 0)
     statusIndicator.Position = UDim2.new(0, 5, 0, 0)
@@ -673,31 +725,28 @@ local function addConsoleLog(message)
     statusIndicator.ZIndex = 104
     statusIndicator.Parent = logFrame
     
-    if message:find("✅") then
-        if isFunctionResult then
-            statusIndicator.Text = "✅"
-            statusIndicator.TextColor3 = CONFIG.COLORS.SUCCESS
-            if shouldCount then
-                State.testResults.passed = State.testResults.passed + 1
-            end
-        else
-            statusIndicator.Text = "ℹ️"
-            statusIndicator.TextColor3 = CONFIG.COLORS.PRIMARY
+    -- Determine status based on message content
+    if message:find("✅") or (isFunctionResult and (message:lower():find("working") or message:lower():find("passed"))) then
+        statusIndicator.Text = "✅"
+        statusIndicator.TextColor3 = CONFIG.COLORS.SUCCESS
+        if shouldCount then
+            State.testResults.passed = State.testResults.passed + 1
         end
-    elseif message:find("❌") then
-        if isFunctionResult then
-            statusIndicator.Text = "❌"
-            statusIndicator.TextColor3 = CONFIG.COLORS.ERROR
-            if shouldCount then
-                State.testResults.failed = State.testResults.failed + 1
-            end
-        else
-            statusIndicator.Text = "ℹ️"
-            statusIndicator.TextColor3 = CONFIG.COLORS.PRIMARY
+    elseif message:find("❌") or (isFunctionResult and (message:lower():find("function is nil") or message:lower():find("failed") or message:lower():find("error"))) then
+        statusIndicator.Text = "❌"
+        statusIndicator.TextColor3 = CONFIG.COLORS.ERROR
+        if shouldCount then
+            State.testResults.failed = State.testResults.failed + 1
+        end
+    elseif message:find("❕") or message:find("⚠️") or (isFunctionResult and message:lower():find("neutral")) then
+        statusIndicator.Text = "❕"
+        statusIndicator.TextColor3 = CONFIG.COLORS.WARNING
+        if shouldCount then
+            State.testResults.timeout = State.testResults.timeout + 1
         end
     else
         statusIndicator.Text = "ℹ️"
-        statusIndicator.TextColor3 = CONFIG.COLORS.PRIMARY
+        statusIndicator.TextColor3 = CONFIG.COLORS.INFO
     end
     
     -- Message label
@@ -705,7 +754,7 @@ local function addConsoleLog(message)
     messageLabel.Size = UDim2.new(1, -80, 1, 0)
     messageLabel.Position = UDim2.new(0, 35, 0, 0)
     messageLabel.BackgroundTransparency = 1
-    messageLabel.Text = message:gsub("[✅❌]", ""):gsub("^%s+", "")
+    messageLabel.Text = message:gsub("[✅❌❕⚠️ℹ️]", ""):gsub("^%s+", "")
     messageLabel.TextColor3 = CONFIG.COLORS.TEXT_PRIMARY
     messageLabel.TextSize = 12
     messageLabel.Font = Enum.Font.Gotham
@@ -736,7 +785,7 @@ local function addConsoleLog(message)
     -- Update stats and progress if this was a function result
     if isFunctionResult and shouldCount then
         updateStats()
-        local totalTested = State.testResults.passed + State.testResults.failed
+        local totalTested = State.testResults.passed + State.testResults.failed + State.testResults.timeout
         updateProgress(totalTested, State.testResults.total)
     end
 end
@@ -846,7 +895,7 @@ local function runSUNCTest()
         print("📈 Check the GUI for detailed results")
         
         -- Ensure progress shows completion
-        local totalTested = State.testResults.passed + State.testResults.failed
+        local totalTested = State.testResults.passed + State.testResults.failed + State.testResults.timeout
         if totalTested > 0 then
             updateProgress(totalTested, State.testResults.total)
         else
@@ -877,25 +926,29 @@ local function setupSearch(searchBox)
     end)
 end
 
---- Sets up drag functionality for the main frame
--- @param mainFrame: Frame - Main GUI frame
-local function setupDragging(mainFrame)
+--- Sets up drag functionality for the container frame (fixed shadow issue)
+-- @param containerFrame: Frame - Container frame that holds both shadow and main frame
+local function setupDragging(containerFrame)
     local dragging = false
     local dragStart = nil
     local startPos = nil
+    
+    -- Get the main frame for input detection
+    local mainFrame = containerFrame:FindFirstChild("MainFrame")
+    if not mainFrame then return end
     
     mainFrame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
-            startPos = mainFrame.Position
+            startPos = containerFrame.Position
         end
     end)
     
     mainFrame.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
+            containerFrame.Position = UDim2.new(
                 startPos.X.Scale, 
                 startPos.X.Offset + delta.X, 
                 startPos.Y.Scale, 
@@ -921,7 +974,7 @@ local function initialize()
     
     -- Create main GUI structure
     local screenGui = createMainGUI()
-    local mainFrame = createMainFrame(screenGui)
+    local mainFrame, containerFrame = createMainFrame(screenGui)
     local closeButton = createCloseButton(mainFrame)
     
     -- Create panels
@@ -947,7 +1000,7 @@ local function initialize()
     end)
     
     setupSearch(State.ui.searchBox)
-    setupDragging(mainFrame)
+    setupDragging(containerFrame) -- Pass container frame instead of main frame
     
     print("✅ SUNC Testing GUI loaded successfully!")
     print("📋 Click 'Start Test' to begin SUNC compatibility testing")
